@@ -44,7 +44,7 @@ client.once("ready", async () => {
  */
 async function makePairs(guild) {
   const members = await guild.members.fetch();
-  const users = members.filter((m) => !m.user.bot).map((m) => m.user.username);
+  const users = members.filter((m) => !m.user.bot).map((m) => `<@${m.user.id}>`);
 
   // 셔플
   for (let i = users.length - 1; i > 0; i--) {
@@ -99,10 +99,12 @@ function createPairMessage(pairs) {
   let message = "🎉 이번 주 페어가 정해졌어요!\n\n";
   pairs.forEach((group, i) => {
     const emoji = ["👥", "🤝", "💪", "✨", "🌟", "🚀"][i % 6];
-    message += `${emoji} **그룹 ${i + 1}** (${group.length}명): ${group.join(", ")}\n`;
+    message += `${emoji} **그룹 ${i + 1}** (${group.length}명): ${group.join(
+      ", "
+    )}\n`;
   });
 
-  message += "\n💬 오늘까지 꾸문 제출하는 것 잊지마세요~!\n🔥 화이팅입니다!";
+  message += "\n오늘까지 꾸문 제출하는 것 잊지마세요~!\n화이팅입니다! 🔥🔥";
   return message;
 }
 
