@@ -40,11 +40,16 @@ client.once("ready", async () => {
 
 /**
  * 랜덤 페어 매칭 함수
- * 1명이 혼자 남지 않도록 스마트하게 그룹화
+ * 1명이 남으면 마지막 그룹에 포함
  */
 async function makePairs(guild) {
   const members = await guild.members.fetch();
-  const users = members.filter((m) => !m.user.bot).map((m) => `<@${m.user.id}>`);
+
+  const users = members
+    .filter(
+      (m) => !m.user.bot && m.roles.cache.has(process.env.THIRD_GEN_ROLE_ID)
+    )
+    .map((m) => `<@${m.user.id}>`);
 
   // 셔플
   for (let i = users.length - 1; i > 0; i--) {
@@ -52,43 +57,18 @@ async function makePairs(guild) {
     [users[i], users[j]] = [users[j], users[i]];
   }
 
-  // 2~3명씩 그룹화 (1명이 남지 않도록 스마트하게)
   const pairs = [];
-  while (users.length > 0) {
-    let size;
 
-    if (users.length === 1) {
-      // 1명 남으면 이전 그룹에 합치기
-      if (pairs.length > 0) {
-        pairs[pairs.length - 1].push(users[0]);
-        break;
-      } else {
-        // 처음부터 1명이면 그대로
-        pairs.push(users.splice(0, 1));
-      }
-    } else if (users.length === 2 || users.length === 3) {
-      // 2~3명 남으면 한 그룹으로
-      pairs.push(users.splice(0, users.length));
-    } else if (users.length === 4) {
-      // 4명 남으면 2+2로
-      size = 2;
-      pairs.push(users.splice(0, size));
-    } else if (users.length === 5) {
-      // 5명 남으면 2 또는 3 선택 (남은 3명 또는 2명)
-      size = Math.random() < 0.5 ? 2 : 3;
-      pairs.push(users.splice(0, size));
-    } else {
-      // 6명 이상: 다음 선택이 1명을 남기지 않는지 확인
-      if (users.length % 2 === 1) {
-        // 홀수면 3명 선택 (남은 수를 짝수로)
-        size = 3;
-      } else {
-        // 짝수면 랜덤
-        size = Math.random() < 0.5 ? 2 : 3;
-      }
-      pairs.push(users.splice(0, size));
-    }
+  // 2명씩 묶기
+  while (users.length >= 2) {
+    pairs.push(users.splice(0, 2));
   }
+
+  // 1명 남으면 마지막 팀에 합치기
+  if (users.length === 1 && pairs.length > 0) {
+    pairs[pairs.length - 1].push(users[0]);
+  }
+
   return pairs;
 }
 
