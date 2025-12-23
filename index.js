@@ -29,16 +29,16 @@ client.once("ready", async () => {
       description: "댓글 작성 완료 처리",
       options: [
         {
-          name: "writer",
-          description: "댓글 작성자 (생략 시 명령 실행자)",
-          type: 6,
-          required: false,
-        },
-        {
           name: "target",
           description: "댓글 대상",
           type: 6,
           required: true,
+        },
+        {
+          name: "writer",
+          description: "댓글 작성자 (생략 시 명령 실행자)",
+          type: 6,
+          required: false,
         },
       ],
     },
