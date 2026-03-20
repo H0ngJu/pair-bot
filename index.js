@@ -81,6 +81,8 @@ async function makePairs(guild) {
     )
     .map((m) => `<@${m.user.id}>`);
 
+  console.log(`[makePairs] 매칭 대상 ${users.length}명`);
+
   // 셔플
   for (let i = users.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -99,6 +101,7 @@ async function makePairs(guild) {
     pairs[pairs.length - 1].push(users[0]);
   }
 
+  console.log(`[makePairs] ${pairs.length}개 그룹 생성 완료`);
   return pairs;
 }
 
@@ -124,6 +127,8 @@ function createPairMessage(pairs, cycle) {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  console.log(`[커맨드] /${interaction.commandName} 실행 by ${interaction.user.username} (${interaction.user.id})`);
+
   // /pair
   if (interaction.commandName === "pair") {
     if (!interaction.deferred && !interaction.replied) {
@@ -136,6 +141,8 @@ client.on("interactionCreate", async (interaction) => {
       const biweekStart = getBiweekStart();
       const cycle = getBiweekCycle(biweekStart);
 
+      console.log(`[/pair] ${cycle}회차, biweekStart=${biweekStart}, ${pairs.length}개 그룹`);
+
       for (const [groupIndex, group] of pairs.entries()) {
         for (const mention of group) {
           const userId = mention.replace(/[<@>]/g, "");
@@ -143,6 +150,7 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
 
+      console.log(`[/pair] 시트 기록 완료`);
       await interaction.editReply(createPairMessage(pairs, cycle));
     } catch (error) {
       console.error(error);
@@ -182,11 +190,13 @@ client.on("interactionCreate", async (interaction) => {
     );
 
     if (already) {
+      console.log(`[/comment] 중복 기록 - writer=${writer.username}, target=${target.username}, biweek=${biweekStart}`);
       return interaction.editReply(
         "✅ 이미 이번 2주에 해당 댓글이 기록되어 있어요!"
       );
     }
 
+    console.log(`[/comment] 기록 - writer=${writer.username}, target=${target.username}, cycle=${cycle}`);
     await appendRow("bot_weekly_comments", [
       biweekStart,
       cycle,
@@ -204,13 +214,23 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 client.on("threadCreate", async (thread) => {
-  if (thread.parentId !== process.env.FORUM_CHANNEL_ID) return;
+  console.log(`[threadCreate] 새 스레드 감지: "${thread.name}" (parentId=${thread.parentId})`);
+
+  if (thread.parentId !== process.env.FORUM_CHANNEL_ID) {
+    console.log(`[threadCreate] 포럼 채널 아님, 스킵 (expected=${process.env.FORUM_CHANNEL_ID})`);
+    return;
+  }
 
   const ownerId = thread.ownerId;
-  if (!ownerId) return;
+  if (!ownerId) {
+    console.log(`[threadCreate] ownerId 없음, 스킵`);
+    return;
+  }
 
   const biweekStart = getBiweekStart(thread.createdAt);
   const cycle = getBiweekCycle(biweekStart);
+
+  console.log(`[threadCreate] 포스트 기록 - user=${ownerId}, cycle=${cycle}, date=${thread.createdAt.toISOString()}`);
 
   await appendRow("bot_weekly_posts", [
     biweekStart,
@@ -219,7 +239,7 @@ client.on("threadCreate", async (thread) => {
     thread.createdAt.toISOString(),
   ]);
 
-  console.log("📝 포럼 새 포스트 기록:", ownerId);
+  console.log(`[threadCreate] 시트 기록 완료`);
 });
 
 /**
@@ -235,9 +255,11 @@ cron.schedule(
         new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       );
 
+      console.log(`[cron:pair] 월요일 10시 체크 - current=${currentBiweek}, previous=${previousBiweek}`);
+
       // 2주 주기가 변경된 월요일에만 실행
       if (currentBiweek === previousBiweek) {
-        console.log("ℹ️ 2주 주기 미변경, 페어 매칭 스킵");
+        console.log("[cron:pair] 2주 주기 미변경, 페어 매칭 스킵");
         return;
       }
 
@@ -245,6 +267,8 @@ cron.schedule(
       const channel = await client.channels.fetch(process.env.PAIR_CHANNEL_ID);
       const pairs = await makePairs(guild);
       const cycle = getBiweekCycle(currentBiweek);
+
+      console.log(`[cron:pair] ${cycle}회차 페어 매칭 시작, ${pairs.length}개 그룹`);
 
       for (const [groupIndex, group] of pairs.entries()) {
         for (const mention of group) {
@@ -256,9 +280,9 @@ cron.schedule(
       const message = createPairMessage(pairs, cycle);
 
       await channel.send(message);
-      console.log("✅ 자동 페어 매칭 완료 (격주 월요일 10시)");
+      console.log("[cron:pair] 자동 페어 매칭 완료 (격주 월요일 10시)");
     } catch (error) {
-      console.error("❌ 자동 페어 매칭 실패:", error);
+      console.error("[cron:pair] 자동 페어 매칭 실패:", error);
     }
   },
   { timezone: "Asia/Seoul" }
@@ -278,9 +302,11 @@ cron.schedule(
         new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       );
 
+      console.log(`[cron:fine] 화요일 23:59 체크 - current=${currentBiweek}, previousWeek=${previousWeekBiweek}`);
+
       // 2주 주기가 변경되지 않았으면 스킵
       if (currentBiweek === previousWeekBiweek) {
-        console.log("ℹ️ 2주 주기 미변경, 벌금 정산 스킵");
+        console.log("[cron:fine] 2주 주기 미변경, 벌금 정산 스킵");
         return;
       }
 
@@ -289,10 +315,14 @@ cron.schedule(
       lastBiweekDate.setDate(lastBiweekDate.getDate() - 1);
       const lastBiweek = getBiweekStart(lastBiweekDate);
 
+      console.log(`[cron:fine] 정산 대상: ${lastBiweek} (${getBiweekCycle(lastBiweek)}회차)`);
+
       /* 2️⃣ 데이터 조회 */
       const members = await getRows("bot_members");
       const comments = await getRows("bot_weekly_comments");
       const posts = await getRows("bot_weekly_posts");
+
+      console.log(`[cron:fine] 데이터 조회 완료 - members=${members.length}, comments=${comments.length}, posts=${posts.length}`);
 
       /* 3️⃣ 댓글 작성자 */
       const commented = new Set(
@@ -320,6 +350,9 @@ cron.schedule(
             postMap.set(userId, time);
           }
         });
+
+      console.log(`[cron:fine] 댓글 작성자 ${commented.size}명, 포스트 작성자 ${postMap.size}명`);
+      console.log(`[cron:fine] 마감: onTime=${onTimeDeadline.toISOString()}, late=${lateDeadline.toISOString()}`);
 
       /* 5️⃣ 사용자별 벌금 계산 */
       const fines = calculateFines(members, commented, postMap, onTimeDeadline, lateDeadline);
@@ -355,12 +388,15 @@ cron.schedule(
         await channel.send(message);
       }
 
-      console.log("💸 벌금 처리 완료:", fines);
+      console.log(`[cron:fine] 벌금 처리 완료 - 대상 ${fines.length}명`);
+      fines.forEach((f) => console.log(`  - ${f.userId}: ${f.totalFine}원 (${f.reasons.join(", ")})`));
     } catch (error) {
-      console.error("❌ 벌금 cron 오류:", error);
+      console.error("[cron:fine] 벌금 cron 오류:", error);
     }
   },
   { timezone: "Asia/Seoul" }
 );
 
+console.log(`[시작] 봇 시작 시각: ${new Date().toISOString()}`);
+console.log(`[시작] cron 등록: 페어 매칭(월 10:00 KST), 벌금 정산(화 23:59 KST)`);
 client.login(process.env.DISCORD_TOKEN);
