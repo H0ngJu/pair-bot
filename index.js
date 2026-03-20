@@ -3,6 +3,7 @@ import cron from "node-cron";
 import dotenv from "dotenv";
 import { getBiweekStart, getBiweekCycle } from "./dateUtils.js";
 import { appendRow, getRows } from "./googleSheets.js";
+import { getDeadlines, calculateFines } from "./fineUtils.js";
 dotenv.config();
 
 const client = new Client({
@@ -17,6 +18,15 @@ client.once("ready", async () => {
   console.log(`✅ 로그인됨: ${client.user.tag}`);
   const guild = await client.guilds.fetch(process.env.GUILD_ID);
   console.log(`🔗 연결된 서버: ${guild.name}`);
+
+  // 포럼 채널 접근 테스트
+  try {
+    const forumChannel = await client.channels.fetch(process.env.FORUM_CHANNEL_ID);
+    console.log(`✅ 포럼 채널 접근 가능: ${forumChannel.name} (${forumChannel.id})`);
+  } catch (error) {
+    console.error(`❌ 포럼 채널 접근 실패: ${error.message}`);
+    console.error(`   채널 ID: ${process.env.FORUM_CHANNEL_ID}`);
+  }
 
   // 슬래시 커맨드 등록
   const commands = [
@@ -149,7 +159,9 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.deferReply({ ephemeral: true });
     }
 
-    const biweekStart = getBiweekStart();
+    // 월요일에 제출한 댓글은 이전 사이클(N-1)로 기록
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const biweekStart = getBiweekStart(yesterday);
     const cycle = getBiweekCycle(biweekStart);
 
     // writer가 없으면 명령 실행자가 writer
@@ -260,18 +272,22 @@ cron.schedule(
   "59 23 * * 2",
   async () => {
     try {
-      /* 1️⃣ 기준 2주 계산 (지난 2주) */
-      const lastBiweek = getBiweekStart(
-        new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+      /* 1️⃣ 기준 2주 계산 */
+      const currentBiweek = getBiweekStart();
+      const previousWeekBiweek = getBiweekStart(
+        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       );
 
-      const currentBiweek = getBiweekStart();
-
       // 2주 주기가 변경되지 않았으면 스킵
-      if (lastBiweek === currentBiweek) {
+      if (currentBiweek === previousWeekBiweek) {
         console.log("ℹ️ 2주 주기 미변경, 벌금 정산 스킵");
         return;
       }
+
+      // 정산 대상: 이전 사이클
+      const lastBiweekDate = new Date(`${currentBiweek}T00:00:00Z`);
+      lastBiweekDate.setDate(lastBiweekDate.getDate() - 1);
+      const lastBiweek = getBiweekStart(lastBiweekDate);
 
       /* 2️⃣ 데이터 조회 */
       const members = await getRows("bot_members");
@@ -284,10 +300,20 @@ cron.schedule(
       );
 
       /* 4️⃣ 포럼 포스트 */
+      const { onTimeDeadline, lateDeadline } = getDeadlines(currentBiweek);
+
       const postMap = new Map();
 
       posts
-        .filter((r) => r[0] === lastBiweek)
+        .filter((r) => {
+          // lastBiweek 기간에 작성된 포스트
+          if (r[0] === lastBiweek) return true;
+          // 마감일(월)/지각(화)에 작성된 포스트 (currentBiweek으로 기록됨)
+          if (r[0] === currentBiweek) {
+            return new Date(r[3]) <= lateDeadline;
+          }
+          return false;
+        })
         .forEach(([_, __, userId, createdAt]) => {
           const time = new Date(createdAt);
           if (!postMap.has(userId) || postMap.get(userId) > time) {
@@ -295,44 +321,8 @@ cron.schedule(
           }
         });
 
-      /* 5️⃣ 포럼 벌금 계산 함수 */
-      function calcPostFine(postTime) {
-        if (!postTime) return 5000;
-
-        const biweekStartDate = new Date(`${lastBiweek}T23:59:59`);
-        const deadline = new Date(biweekStartDate);
-        deadline.setDate(deadline.getDate() + 14); // 2주 후 마감
-
-        if (postTime <= deadline) return 0;
-        return 5000;
-      }
-
-      /* 6️⃣ 사용자별 벌금 계산 */
-      const fines = [];
-
-      for (const [userId] of members) {
-        let totalFine = 0;
-        const reasons = [];
-
-        // 댓글 벌금
-        if (!commented.has(userId)) {
-          totalFine += 1000;
-          reasons.push("댓글 미작성");
-        }
-
-        // 포럼 벌금
-        const postTime = postMap.get(userId);
-        const postFine = calcPostFine(postTime);
-
-        if (postFine > 0) {
-          totalFine += postFine;
-          reasons.push("꾸문 미작성");
-        }
-
-        if (totalFine > 0) {
-          fines.push({ userId, totalFine, reasons });
-        }
-      }
+      /* 5️⃣ 사용자별 벌금 계산 */
+      const fines = calculateFines(members, commented, postMap, onTimeDeadline, lateDeadline);
 
       /* 7️⃣ 시트 기록 */
       const lastCycle = getBiweekCycle(lastBiweek);

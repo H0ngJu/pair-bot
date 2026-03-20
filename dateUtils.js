@@ -26,10 +26,10 @@ export function getBiweekStart(date = new Date()) {
   let deadlineCount;
   if (daysDiff < 0) {
     deadlineCount = 0;
-  } else if (daysDiff <= 15) {
+  } else if (daysDiff <= 13) {
     deadlineCount = 0;
   } else {
-    deadlineCount = Math.floor((daysDiff - 16) / 14) + 1;
+    deadlineCount = Math.floor((daysDiff - 14) / 14) + 1;
   }
 
   const biweekStart = new Date(baseDateString);
