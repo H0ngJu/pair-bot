@@ -167,9 +167,11 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.deferReply({ ephemeral: true });
     }
 
-    // 월요일에 제출한 댓글은 이전 사이클(N-1)로 기록
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const biweekStart = getBiweekStart(yesterday);
+    // 댓글은 이전 사이클(포스트 작성 기간)로 기록
+    const currentBiweek = getBiweekStart();
+    const prevDate = new Date(`${currentBiweek}T00:00:00Z`);
+    prevDate.setDate(prevDate.getDate() - 1);
+    const biweekStart = getBiweekStart(prevDate);
     const cycle = getBiweekCycle(biweekStart);
 
     // writer가 없으면 명령 실행자가 writer
@@ -310,12 +312,18 @@ cron.schedule(
         return;
       }
 
-      // 정산 대상: 이전 사이클
+      // lastBiweek: 댓글 기간 / 포스트 마감 기준
       const lastBiweekDate = new Date(`${currentBiweek}T00:00:00Z`);
       lastBiweekDate.setDate(lastBiweekDate.getDate() - 1);
       const lastBiweek = getBiweekStart(lastBiweekDate);
 
-      console.log(`[cron:fine] 정산 대상: ${lastBiweek} (${getBiweekCycle(lastBiweek)}회차)`);
+      // postBiweek: 포스트 작성 기간 (정산 대상)
+      const postBiweekDate = new Date(`${lastBiweek}T00:00:00Z`);
+      postBiweekDate.setDate(postBiweekDate.getDate() - 1);
+      const postBiweek = getBiweekStart(postBiweekDate);
+      const settleCycle = getBiweekCycle(postBiweek);
+
+      console.log(`[cron:fine] 정산 대상: ${settleCycle}회차 (포스트: ${postBiweek}, 댓글/마감: ${lastBiweek})`);
 
       /* 2️⃣ 데이터 조회 */
       const members = await getRows("bot_members");
@@ -324,22 +332,22 @@ cron.schedule(
 
       console.log(`[cron:fine] 데이터 조회 완료 - members=${members.length}, comments=${comments.length}, posts=${posts.length}`);
 
-      /* 3️⃣ 댓글 작성자 */
+      /* 3️⃣ 댓글 작성자 (postBiweek 기준으로 기록됨) */
       const commented = new Set(
-        comments.filter((r) => r[0] === lastBiweek).map((r) => r[2])
+        comments.filter((r) => r[0] === postBiweek).map((r) => r[2])
       );
 
       /* 4️⃣ 포럼 포스트 */
-      const { onTimeDeadline, lateDeadline } = getDeadlines(currentBiweek);
+      const { onTimeDeadline, lateDeadline } = getDeadlines(lastBiweek);
 
       const postMap = new Map();
 
       posts
         .filter((r) => {
-          // lastBiweek 기간에 작성된 포스트
-          if (r[0] === lastBiweek) return true;
-          // 마감일(월)/지각(화)에 작성된 포스트 (currentBiweek으로 기록됨)
-          if (r[0] === currentBiweek) {
+          // postBiweek 기간에 작성된 포스트
+          if (r[0] === postBiweek) return true;
+          // 마감일(월)/지각(화)에 작성된 포스트 (lastBiweek으로 기록됨)
+          if (r[0] === lastBiweek) {
             return new Date(r[3]) <= lateDeadline;
           }
           return false;
@@ -358,11 +366,10 @@ cron.schedule(
       const fines = calculateFines(members, commented, postMap, onTimeDeadline, lateDeadline);
 
       /* 7️⃣ 시트 기록 */
-      const lastCycle = getBiweekCycle(lastBiweek);
       for (const f of fines) {
         await appendRow("bot_fines", [
-          lastBiweek,
-          lastCycle,
+          postBiweek,
+          settleCycle,
           f.userId,
           f.totalFine,
           f.reasons.join(", "),
@@ -377,7 +384,7 @@ cron.schedule(
         );
 
         const message =
-          `💸 **${lastCycle}회차** 벌금 정산 결과입니다.\n\n` +
+          `💸 **${settleCycle}회차** 벌금 정산 결과입니다.\n\n` +
           fines
             .map(
               (f) =>
